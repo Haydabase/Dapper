@@ -55,6 +55,8 @@ namespace Dapper.Tests.Contrib
                 connection.Execute("CREATE TABLE GenericType (Id nvarchar(100) not null, Name nvarchar(100) not null);");
                 dropTable("NullableDates");
                 connection.Execute("CREATE TABLE NullableDates (Id int IDENTITY(1,1) not null, DateValue DateTime null);");
+                dropTable("Versioned");
+                connection.Execute("CREATE TABLE Versioned (Id nvarchar(100) not null, Name nvarchar(100) not null, RowVersion rowversion);");
             }
         }
     }
@@ -103,6 +105,11 @@ namespace Dapper.Tests.Contrib
                     connection.Execute("CREATE TABLE GenericType (Id nvarchar(100) not null, Name nvarchar(100) not null);");
                     dropTable("NullableDates");
                     connection.Execute("CREATE TABLE NullableDates (Id int not null AUTO_INCREMENT PRIMARY KEY, DateValue DateTime);");
+                    dropTable("Versioned");
+                    connection.Execute("CREATE TABLE Versioned (Id nvarchar(100) not null, Name nvarchar(100) not null, RowVersion binary(8) null);");
+                    connection.Execute(@"CREATE TRIGGER update_row_version BEFORE UPDATE on Versioned 
+                    FOR EACH ROW
+                    SET NEW.RowVersion = RANDOM_BYTES(8); ");
                 }
             }
             catch (MySqlException e)
@@ -140,6 +147,14 @@ namespace Dapper.Tests.Contrib
                 connection.Execute("CREATE TABLE ObjectZ (Id integer not null, Name nvarchar(100) not null) ");
                 connection.Execute("CREATE TABLE GenericType (Id nvarchar(100) not null, Name nvarchar(100) not null) ");
                 connection.Execute("CREATE TABLE NullableDates (Id integer primary key autoincrement not null, DateValue DateTime) ");
+                connection.Execute("CREATE TABLE Versioned (Id nvarchar(100) not null, Name nvarchar(100) not null, RowVersion blob null) ");
+                connection.Execute(@"CREATE TRIGGER SetRowVersionOnUpdate
+                AFTER UPDATE ON Versioned
+                BEGIN
+                    UPDATE Versioned
+                    SET RowVersion = randomblob(8)
+                    WHERE rowid = NEW.rowid;
+                END");
             }
         }
     }
@@ -173,6 +188,7 @@ namespace Dapper.Tests.Contrib
                 connection.Execute(@"CREATE TABLE ObjectZ (Id int not null, Name nvarchar(100) not null) ");
                 connection.Execute(@"CREATE TABLE GenericType (Id nvarchar(100) not null, Name nvarchar(100) not null) ");
                 connection.Execute(@"CREATE TABLE NullableDates (Id int IDENTITY(1,1) not null, DateValue DateTime null) ");
+                connection.Execute("CREATE TABLE Versioned (Id nvarchar(100) not null, Name nvarchar(100) not null, RowVersion rowversion);");
             }
             Console.WriteLine("Created database");
         }

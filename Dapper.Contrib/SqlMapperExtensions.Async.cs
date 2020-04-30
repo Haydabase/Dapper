@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -167,22 +168,24 @@ namespace Dapper.Contrib.Extensions
             var allProperties = TypePropertiesCache(type);
             var keyProperties = KeyPropertiesCache(type).ToList();
             var computedProperties = ComputedPropertiesCache(type);
-            var allPropertiesExceptKeyAndComputed = allProperties.Except(keyProperties.Union(computedProperties)).ToList();
+            var versionProperties = VersionPropertiesCache(type);
+            var nonSettableProperties = keyProperties.Concat(versionProperties).Union(computedProperties);
+            var setProperties = allProperties.Except(nonSettableProperties).ToList();
 
-            for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count; i++)
+            for (var i = 0; i < setProperties.Count; i++)
             {
-                var property = allPropertiesExceptKeyAndComputed[i];
+                var property = setProperties[i];
                 sqlAdapter.AppendColumnName(sbColumnList, property.Name);
-                if (i < allPropertiesExceptKeyAndComputed.Count - 1)
+                if (i < setProperties.Count - 1)
                     sbColumnList.Append(", ");
             }
 
             var sbParameterList = new StringBuilder(null);
-            for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count; i++)
+            for (var i = 0; i < setProperties.Count; i++)
             {
-                var property = allPropertiesExceptKeyAndComputed[i];
+                var property = setProperties[i];
                 sbParameterList.AppendFormat("@{0}", property.Name);
-                if (i < allPropertiesExceptKeyAndComputed.Count - 1)
+                if (i < setProperties.Count - 1)
                     sbParameterList.Append(", ");
             }
 
@@ -232,7 +235,7 @@ namespace Dapper.Contrib.Extensions
                 }
             }
 
-            var keyProperties = KeyPropertiesCache(type).ToList();
+            var keyProperties = KeyPropertiesCache(type);
             var explicitKeyProperties = ExplicitKeyPropertiesCache(type);
             if (keyProperties.Count == 0 && explicitKeyProperties.Count == 0)
                 throw new ArgumentException("Entity must have at least one [Key] or [ExplicitKey] property");
@@ -243,27 +246,30 @@ namespace Dapper.Contrib.Extensions
             sb.AppendFormat("update {0} set ", name);
 
             var allProperties = TypePropertiesCache(type);
-            keyProperties.AddRange(explicitKeyProperties);
             var computedProperties = ComputedPropertiesCache(type);
-            var nonIdProps = allProperties.Except(keyProperties.Union(computedProperties)).ToList();
+            var versionProperties = VersionPropertiesCache(type);
+            var filterProperties = keyProperties.Concat(explicitKeyProperties).Concat(versionProperties).ToList();
+            var nonSettableProperties = filterProperties.Union(computedProperties);
+            var setProperties = allProperties.Except(nonSettableProperties).ToList();
 
             var adapter = GetFormatter(connection);
 
-            for (var i = 0; i < nonIdProps.Count; i++)
+            for (var i = 0; i < setProperties.Count; i++)
             {
-                var property = nonIdProps[i];
+                var property = setProperties[i];
                 adapter.AppendColumnNameEqualsValue(sb, property.Name);
-                if (i < nonIdProps.Count - 1)
+                if (i < setProperties.Count - 1)
                     sb.Append(", ");
             }
             sb.Append(" where ");
-            for (var i = 0; i < keyProperties.Count; i++)
+            for (var i = 0; i < filterProperties.Count; i++)
             {
-                var property = keyProperties[i];
+                var property = filterProperties[i];
                 adapter.AppendColumnNameEqualsValue(sb, property.Name);
-                if (i < keyProperties.Count - 1)
+                if (i < filterProperties.Count - 1)
                     sb.Append(" and ");
             }
+
             var updated = await connection.ExecuteAsync(sb.ToString(), entityToUpdate, commandTimeout: commandTimeout, transaction: transaction).ConfigureAwait(false);
             return updated > 0;
         }
@@ -307,18 +313,19 @@ namespace Dapper.Contrib.Extensions
                 throw new ArgumentException("Entity must have at least one [Key] or [ExplicitKey] property");
 
             var name = GetTableName(type);
-            var allKeyProperties = keyProperties.Concat(explicitKeyProperties).ToList();
+            var versionProperties = VersionPropertiesCache(type);
+            var filterProperties = keyProperties.Concat(explicitKeyProperties).Concat(versionProperties).ToList();
 
             var sb = new StringBuilder();
             sb.AppendFormat("DELETE FROM {0} WHERE ", name);
 
             var adapter = GetFormatter(connection);
             
-            for (var i = 0; i < allKeyProperties.Count; i++)
+            for (var i = 0; i < filterProperties.Count; i++)
             {
-                var property = allKeyProperties[i];
+                var property = filterProperties[i];
                 adapter.AppendColumnNameEqualsValue(sb, property.Name);
-                if (i < allKeyProperties.Count - 1)
+                if (i < filterProperties.Count - 1)
                     sb.Append(" AND ");
             }
             var deleted = await connection.ExecuteAsync(sb.ToString(), entityToDelete, transaction, commandTimeout).ConfigureAwait(false);

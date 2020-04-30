@@ -6,7 +6,7 @@ using System.Transactions;
 using Dapper.Contrib.Extensions;
 using Xunit;
 
-using FactAttribute = Dapper.Tests.Contrib.SkippableFactAttribute;
+//using FactAttribute = Dapper.Tests.Contrib.SkippableFactAttribute;
 
 namespace Dapper.Tests.Contrib
 {
@@ -100,6 +100,16 @@ namespace Dapper.Tests.Contrib
         [ExplicitKey]
         public string Id { get; set; }
         public string Name { get; set; }
+    }
+
+    [Table("Versioned")]
+    public class Versioned
+    {
+        [ExplicitKey]
+        public string Id { get; set; }
+        public string Name { get; set; }
+        [Version]
+        public byte[] RowVersion { get; set; }
     }
 
     public abstract partial class TestSuite

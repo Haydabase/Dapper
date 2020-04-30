@@ -151,6 +151,19 @@ Dapper.Contrib makes use of some optional attributes:
     ```
 * `[Write(true/false)]` -  this property is (not) writeable
 * `[Computed]` - this property is computed and should not be part of updates
+* `[Version]` - this property is a version column, auto-incremented by the
+   database, so should be filtered on in updates and deletes, and should not be
+   written on updates
+
+    ```csharp
+    public class Employee
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        [Version]
+        public byte[] RowVersion { get; set; }
+    }
+    ```
 
 Limitations and caveats
 -------

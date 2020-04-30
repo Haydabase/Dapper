@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 
 using Dapper.Contrib.Extensions;
-using FactAttribute = Dapper.Tests.Contrib.SkippableFactAttribute;
+//using FactAttribute = Dapper.Tests.Contrib.SkippableFactAttribute;
 using Xunit;
 
 namespace Dapper.Tests.Contrib
@@ -470,6 +470,31 @@ namespace Dapper.Tests.Contrib
                 await connection.DeleteAllAsync<User>().ConfigureAwait(false);
                 Assert.Null(await connection.GetAsync<User>(id1).ConfigureAwait(false));
                 Assert.Null(await connection.GetAsync<User>(id2).ConfigureAwait(false));
+            }
+        }
+
+        [Fact]
+        public async Task UpdateWithOptimisticLockingAsync()
+        {
+            using (var connection = GetOpenConnection())
+            {
+                var id = Guid.NewGuid().ToString();
+                await connection.InsertAsync(new Versioned { Id = id, Name = "Alice" }).ConfigureAwait(false);
+                var value = await connection.GetAsync<Versioned>(id).ConfigureAwait(false);
+                value.Name = "Bob";
+                Assert.True(await connection.UpdateAsync(value).ConfigureAwait(false));
+
+                var value1 = await connection.GetAsync<Versioned>(id).ConfigureAwait(false);
+                var value2 = await connection.GetAsync<Versioned>(id).ConfigureAwait(false);
+                Assert.Equal("Bob", value1.Name);
+                Assert.Equal("Bob", value2.Name);
+                value1.Name = "Chris";
+                value2.Name = "Dave";
+                Assert.True(await connection.UpdateAsync(value1).ConfigureAwait(false));
+                Assert.False(await connection.UpdateAsync(value2).ConfigureAwait(false));
+
+                var updatedValue = await connection.GetAsync<Versioned>(id).ConfigureAwait(false);
+                Assert.Equal("Chris", updatedValue.Name);
             }
         }
     }

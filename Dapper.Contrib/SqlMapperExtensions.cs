@@ -56,6 +56,7 @@ namespace Dapper.Contrib.Extensions
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> ExplicitKeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> TypeProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> ComputedProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
+        private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> VersionProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> GetQueries = new ConcurrentDictionary<RuntimeTypeHandle, string>();
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
 
@@ -82,6 +83,19 @@ namespace Dapper.Contrib.Extensions
 
             ComputedProperties[type.TypeHandle] = computedProperties;
             return computedProperties;
+        }
+
+        private static List<PropertyInfo> VersionPropertiesCache(Type type)
+        {
+            if (VersionProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo> pi))
+            {
+                return pi.ToList();
+            }
+
+            var versionProperties = TypePropertiesCache(type).Where(p => p.GetCustomAttributes(true).Any(a => a is VersionAttribute)).ToList();
+
+            VersionProperties[type.TypeHandle] = versionProperties;
+            return versionProperties;
         }
 
         private static List<PropertyInfo> ExplicitKeyPropertiesCache(Type type)
@@ -345,24 +359,26 @@ namespace Dapper.Contrib.Extensions
             var allProperties = TypePropertiesCache(type);
             var keyProperties = KeyPropertiesCache(type);
             var computedProperties = ComputedPropertiesCache(type);
-            var allPropertiesExceptKeyAndComputed = allProperties.Except(keyProperties.Union(computedProperties)).ToList();
+            var versionProperties = VersionPropertiesCache(type);
+            var nonSettableProperties = keyProperties.Concat(versionProperties).Union(computedProperties);
+            var setProperties = allProperties.Except(nonSettableProperties).ToList();
 
             var adapter = GetFormatter(connection);
 
-            for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count; i++)
+            for (var i = 0; i < setProperties.Count; i++)
             {
-                var property = allPropertiesExceptKeyAndComputed[i];
+                var property = setProperties[i];
                 adapter.AppendColumnName(sbColumnList, property.Name);  //fix for issue #336
-                if (i < allPropertiesExceptKeyAndComputed.Count - 1)
+                if (i < setProperties.Count - 1)
                     sbColumnList.Append(", ");
             }
 
             var sbParameterList = new StringBuilder(null);
-            for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count; i++)
+            for (var i = 0; i < setProperties.Count; i++)
             {
-                var property = allPropertiesExceptKeyAndComputed[i];
+                var property = setProperties[i];
                 sbParameterList.AppendFormat("@{0}", property.Name);
-                if (i < allPropertiesExceptKeyAndComputed.Count - 1)
+                if (i < setProperties.Count - 1)
                     sbParameterList.Append(", ");
             }
 
@@ -420,7 +436,7 @@ namespace Dapper.Contrib.Extensions
                 }
             }
 
-            var keyProperties = KeyPropertiesCache(type).ToList();  //added ToList() due to issue #418, must work on a list copy
+            var keyProperties = KeyPropertiesCache(type);  //added ToList() due to issue #418, must work on a list copy
             var explicitKeyProperties = ExplicitKeyPropertiesCache(type);
             if (keyProperties.Count == 0 && explicitKeyProperties.Count == 0)
                 throw new ArgumentException("Entity must have at least one [Key] or [ExplicitKey] property");
@@ -431,25 +447,27 @@ namespace Dapper.Contrib.Extensions
             sb.AppendFormat("update {0} set ", name);
 
             var allProperties = TypePropertiesCache(type);
-            keyProperties.AddRange(explicitKeyProperties);
             var computedProperties = ComputedPropertiesCache(type);
-            var nonIdProps = allProperties.Except(keyProperties.Union(computedProperties)).ToList();
+            var versionProperties = VersionPropertiesCache(type);
+            var filterProperties = keyProperties.Concat(explicitKeyProperties).Concat(versionProperties).ToList();
+            var nonSettableProperties = filterProperties.Union(computedProperties);
+            var setProperties = allProperties.Except(nonSettableProperties).ToList();
 
             var adapter = GetFormatter(connection);
 
-            for (var i = 0; i < nonIdProps.Count; i++)
+            for (var i = 0; i < setProperties.Count; i++)
             {
-                var property = nonIdProps[i];
+                var property = setProperties[i];
                 adapter.AppendColumnNameEqualsValue(sb, property.Name);  //fix for issue #336
-                if (i < nonIdProps.Count - 1)
+                if (i < setProperties.Count - 1)
                     sb.Append(", ");
             }
             sb.Append(" where ");
-            for (var i = 0; i < keyProperties.Count; i++)
+            for (var i = 0; i < filterProperties.Count; i++)
             {
-                var property = keyProperties[i];
+                var property = filterProperties[i];
                 adapter.AppendColumnNameEqualsValue(sb, property.Name);  //fix for issue #336
-                if (i < keyProperties.Count - 1)
+                if (i < filterProperties.Count - 1)
                     sb.Append(" and ");
             }
             var updated = connection.Execute(sb.ToString(), entityToUpdate, commandTimeout: commandTimeout, transaction: transaction);
@@ -489,24 +507,25 @@ namespace Dapper.Contrib.Extensions
                 }
             }
 
-            var keyProperties = KeyPropertiesCache(type).ToList();  //added ToList() due to issue #418, must work on a list copy
+            var keyProperties = KeyPropertiesCache(type);
             var explicitKeyProperties = ExplicitKeyPropertiesCache(type);
             if (keyProperties.Count == 0 && explicitKeyProperties.Count == 0)
                 throw new ArgumentException("Entity must have at least one [Key] or [ExplicitKey] property");
 
             var name = GetTableName(type);
-            keyProperties.AddRange(explicitKeyProperties);
+            var versionProperties = VersionPropertiesCache(type);
+            var filterProperties = keyProperties.Concat(explicitKeyProperties).Concat(versionProperties).ToList();
 
             var sb = new StringBuilder();
             sb.AppendFormat("delete from {0} where ", name);
 
             var adapter = GetFormatter(connection);
 
-            for (var i = 0; i < keyProperties.Count; i++)
+            for (var i = 0; i < filterProperties.Count; i++)
             {
-                var property = keyProperties[i];
+                var property = filterProperties[i];
                 adapter.AppendColumnNameEqualsValue(sb, property.Name);  //fix for issue #336
-                if (i < keyProperties.Count - 1)
+                if (i < filterProperties.Count - 1)
                     sb.Append(" and ");
             }
             var deleted = connection.Execute(sb.ToString(), entityToDelete, transaction, commandTimeout);
@@ -759,6 +778,14 @@ namespace Dapper.Contrib.Extensions
     /// </summary>
     [AttributeUsage(AttributeTargets.Property)]
     public class ComputedAttribute : Attribute
+    {
+    }
+
+    /// <summary>
+    /// Specifies that this is a version column, which is managed in the database.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property)]
+    public class VersionAttribute : Attribute
     {
     }
 }
